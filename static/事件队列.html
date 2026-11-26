@@ -25,47 +25,77 @@
   <main class="主区">
     <header class="页头">
       <h1>事件队列</h1>
-      <p>Webhook 投递控制台 · 应用开发全栈 · 非工单客服</p>
+      <p>端点登记 → <b>事件入队</b> → 签名投递 → 失败重试与死信 → 投递账互证</p>
     </header>
 
 <section class="卷">
-  <label>事件类型</label><input id="事件类型" placeholder="例如 invoice.paid"/>
+  <label>事件类型</label><input id="事件类型" placeholder="例如 invoice.paid（以 .timeout 结尾可注入超时）"/>
   <label>端点键</label><input id="端点键" placeholder="ep-billing" value="ep-billing"/>
   <label>载荷摘要</label><input id="载荷摘要" placeholder="key=value"/>
   <label>优先级</label><select id="优先级"><option>紧急</option><option selected>普通</option><option>低</option></select>
   <p class="消息" id="消息"></p>
-  <button class="按钮" type="button" id="入队钮">入队（待投）</button>
-  <button class="按钮 次" type="button" id="夹具钮">灌夹具样例</button>
+  <p>
+    <button class="按钮" type="button" id="入队钮">入队（待投）</button>
+    <button class="按钮 次" type="button" id="夹具钮">灌批量样例</button>
+    <button class="按钮 次" type="button" id="超时夹具钮">灌「注入投递超时夹具」</button>
+  </p>
 </section>
-<section class="卷"><div class="表绕"><table><thead><tr><th>事件号</th><th>事件类型</th><th>端点键</th><th>载荷摘要</th><th>状态</th></tr></thead><tbody id="表"></tbody></table></div></section>
+<section class="卷"><div class="表绕"><table><thead><tr>
+  <th>事件号</th><th>事件类型</th><th>端点键</th><th>载荷摘要</th><th>状态</th><th>事件命运（中文）</th><th>操作</th>
+</tr></thead><tbody id="表"></tbody></table></div></section>
 
   </main>
 
 <script>
 async function 刷表() {
   const rows = await 投递台.getJSON('/api/事件');
-  const tb = document.getElementById('表'); tb.innerHTML='';
+  const tb = document.getElementById('表'); tb.innerHTML = '';
   for (const r of rows) {
-    const tr = 投递台.行('<td>'+投递台.安全文本(r.事件号)+'</td><td>'+投递台.安全文本(r.事件类型)+'</td><td>'+投递台.安全文本(r.端点键)+'</td><td>'+投递台.安全文本(r.载荷摘要)+'</td><td></td>');
-    tr.children[4].appendChild(投递台.徽章(r.状态)); tb.appendChild(tr);
+    const tr = 投递台.行(
+      '<td><a class="事件链接" href="/事件详情.html?eid=' + encodeURIComponent(r.事件号) + '">' + 投递台.安全文本(r.事件号) + '</a></td>'
+      + '<td>' + 投递台.安全文本(r.事件类型) + '</td>'
+      + '<td>' + 投递台.安全文本(r.端点键) + '</td>'
+      + '<td>' + 投递台.安全文本(r.载荷摘要) + '</td>'
+      + '<td class="st"></td><td>' + 投递台.安全文本(r.命运 || r.状态) + '</td><td class="ops"></td>');
+    tr.querySelector('.st').appendChild(投递台.徽章(r.状态));
+    const ops = tr.querySelector('.ops');
+    const a1 = document.createElement('a');
+    a1.className = '事件链接'; a1.textContent = '详情';
+    a1.href = '/事件详情.html?eid=' + encodeURIComponent(r.事件号);
+    ops.appendChild(a1);
+    ops.appendChild(document.createTextNode(' · '));
+    const a2 = document.createElement('a');
+    a2.className = '事件链接'; a2.textContent = '去投递';
+    a2.href = '/投递流水.html?eid=' + encodeURIComponent(r.事件号) + ((r.事件类型 || '').includes('timeout') ? '&timeout=1' : '');
+    ops.appendChild(a2);
+    tb.appendChild(tr);
   }
 }
 document.getElementById('入队钮').onclick = async () => {
   const 消息 = document.getElementById('消息');
   try {
-    await 投递台.postJSON('/api/事件/入队', {
+    const ev = await 投递台.postJSON('/api/事件/入队', {
       事件类型: document.getElementById('事件类型').value,
       端点键: document.getElementById('端点键').value,
       载荷摘要: document.getElementById('载荷摘要').value,
       优先级: document.getElementById('优先级').value,
     });
-    消息.textContent = '已入队，状态待投';
+    消息.textContent = '已入队 ' + ev.事件号 + '，状态待投';
     await 刷表();
   } catch (e) { 消息.textContent = e.message; }
 };
 document.getElementById('夹具钮').onclick = async () => {
   await 投递台.postJSON('/api/夹具入队/批量事件样例', {});
   await 刷表();
+};
+document.getElementById('超时夹具钮').onclick = async () => {
+  const 消息 = document.getElementById('消息');
+  try {
+    const rep = await 投递台.postJSON('/api/夹具入队/注入投递超时夹具', {});
+    const eid = rep.入队 && rep.入队[0] && rep.入队[0].事件号;
+    消息.textContent = '超时事故已注入 ' + (eid || '') + '，点「去投递」后再点签名投递。';
+    await 刷表();
+  } catch (e) { 消息.textContent = e.message; }
 };
 刷表();
 </script>

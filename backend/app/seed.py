@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS 投递尝试 (
   响应码 INTEGER NOT NULL DEFAULT 0,
   说明 TEXT NOT NULL DEFAULT '',
   投递时 TEXT NOT NULL,
+  是否超时 INTEGER NOT NULL DEFAULT 0,
+  票号 TEXT NOT NULL DEFAULT '',
+  锁令牌 TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (事件号) REFERENCES 事件(事件号),
   FOREIGN KEY (端点键) REFERENCES 投递端点(端点键)
 );
@@ -59,7 +62,13 @@ CREATE TABLE IF NOT EXISTS 互证批次 (
   死信数 INTEGER NOT NULL,
   待投数 INTEGER NOT NULL,
   是否对齐 INTEGER NOT NULL,
-  说明 TEXT NOT NULL
+  说明 TEXT NOT NULL,
+  空成功数 INTEGER NOT NULL DEFAULT 0,
+  无成功尝试数 INTEGER NOT NULL DEFAULT 0,
+  超时数 INTEGER NOT NULL DEFAULT 0,
+  影子票数 INTEGER NOT NULL DEFAULT 0,
+  正式票数 INTEGER NOT NULL DEFAULT 0,
+  同票 INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS 操作留痕 (
   编号 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +77,83 @@ CREATE TABLE IF NOT EXISTS 操作留痕 (
   事件号 TEXT NOT NULL DEFAULT '',
   详情 TEXT NOT NULL DEFAULT ''
 );
+-- hook-06 旁路凭证：记下超时拒因，并作为拒空成功回刷的凭据
+CREATE TABLE IF NOT EXISTS 超时凭证 (
+  凭证号 TEXT PRIMARY KEY,
+  事件号 TEXT NOT NULL,
+  尝试号 TEXT NOT NULL DEFAULT '',
+  票号 TEXT NOT NULL DEFAULT '',
+  锁令牌 TEXT NOT NULL DEFAULT '',
+  拒因 TEXT NOT NULL DEFAULT '',
+  超时秒 INTEGER NOT NULL DEFAULT 5,
+  命运 TEXT NOT NULL DEFAULT '记失败',
+  时刻 TEXT NOT NULL
+);
+-- hook-06 双写两轨之只读归档轨：被拒的“超时成功壳”进这里，不进现行流水
+CREATE TABLE IF NOT EXISTS 归档壳 (
+  壳号 TEXT PRIMARY KEY,
+  事件号 TEXT NOT NULL,
+  尝试号 TEXT NOT NULL DEFAULT '',
+  票号 TEXT NOT NULL DEFAULT '',
+  锁令牌 TEXT NOT NULL DEFAULT '',
+  壳JSON TEXT NOT NULL DEFAULT '{}',
+  拒因 TEXT NOT NULL DEFAULT '',
+  轨 TEXT NOT NULL DEFAULT '超时只读归档',
+  入档时 TEXT NOT NULL
+);
+-- 幂等票：同一重试/双击票号并发，只落一次账，余者同票复用
+CREATE TABLE IF NOT EXISTS 幂等票 (
+  票键 TEXT PRIMARY KEY,
+  事件号 TEXT NOT NULL DEFAULT '',
+  状态 TEXT NOT NULL DEFAULT '处理中',
+  响应JSON TEXT NOT NULL DEFAULT '',
+  时刻 TEXT NOT NULL,
+  更新时 TEXT NOT NULL
+);
+-- 投递锁台账：每个事件一把同锁，脚本/页面可读到同一锁令牌
+CREATE TABLE IF NOT EXISTS 投递锁 (
+  事件号 TEXT PRIMARY KEY,
+  票号 TEXT NOT NULL DEFAULT '',
+  令牌 TEXT NOT NULL DEFAULT '',
+  状态 TEXT NOT NULL DEFAULT '处理中',
+  持有时 TEXT NOT NULL,
+  更新时 TEXT NOT NULL
+);
+-- 故障注入开关（夹具「注入投递超时」据此武装）
+CREATE TABLE IF NOT EXISTS 故障注入 (
+  键 TEXT PRIMARY KEY,
+  事件号 TEXT NOT NULL DEFAULT '',
+  种类 TEXT NOT NULL DEFAULT '投递超时',
+  载荷 TEXT NOT NULL DEFAULT '',
+  启用 INTEGER NOT NULL DEFAULT 1,
+  时刻 TEXT NOT NULL
+);
 """
+
+# 旧库平滑补列（CREATE TABLE IF NOT EXISTS 不会给已存在的表加列）
+补列 = {
+    "投递尝试": [
+        ("是否超时", "INTEGER NOT NULL DEFAULT 0"),
+        ("票号", "TEXT NOT NULL DEFAULT ''"),
+        ("锁令牌", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    "互证批次": [
+        ("空成功数", "INTEGER NOT NULL DEFAULT 0"),
+        ("无成功尝试数", "INTEGER NOT NULL DEFAULT 0"),
+        ("超时数", "INTEGER NOT NULL DEFAULT 0"),
+        ("影子票数", "INTEGER NOT NULL DEFAULT 0"),
+        ("正式票数", "INTEGER NOT NULL DEFAULT 0"),
+        ("同票", "INTEGER NOT NULL DEFAULT 1"),
+    ],
+}
+
+
+def 迁移库(conn) -> None:
+    for 表, 列们 in 补列.items():
+        已有 = {r["name"] for r in conn.execute(f"PRAGMA table_info({表})").fetchall()}
+        for 列, 定义 in 列们:
+            if 列 not in 已有:
+                conn.execute(f"ALTER TABLE {表} ADD COLUMN {列} {定义}")
 
 
 def 此刻() -> str:
@@ -78,6 +163,8 @@ def 此刻() -> str:
 def 初始化库() -> None:
     conn = 连接()
     conn.executescript(建表)
+    迁移库(conn)
+    conn.commit()
     if conn.execute("SELECT COUNT(*) AS c FROM 用户").fetchone()["c"] == 0:
         conn.execute("INSERT INTO 用户(账号,密码哈希,角色) VALUES (?,?,?)", ("admin", "123456", "管理员"))
     if conn.execute("SELECT COUNT(*) AS c FROM 签名规").fetchone()["c"] == 0:

@@ -24,26 +24,114 @@
   </header>
   <main class="主区">
     <header class="页头">
-      <h1>事件详情</h1>
+      <h1>事件队列详情 · 事件命运与尝试行</h1>
       <p>Webhook 投递控制台 · 应用开发全栈 · 非工单客服</p>
     </header>
 
 <section class="卷">
-  <label>事件号</label><input id="事件号"/>
-  <button class="按钮" type="button" id="查">查询</button>
-  <pre id="出" class="说明"></pre>
+  <label>事件号</label><input id="事件号" placeholder="EVT-..."/>
+  <p class="消息" id="消息"></p>
+  <p>
+    <button class="按钮" type="button" id="查">查询</button>
+    <button class="按钮" type="button" id="投递钮">签名投递一次</button>
+    <button class="按钮 次" type="button" id="超时投递钮">注入超时并投递</button>
+    <a class="按钮 次" style="text-decoration:none;display:inline-block" href="/投递流水.html">去投递流水</a>
+  </p>
+</section>
+
+<div id="命运卡位"></div>
+
+<section class="卷" id="尝试卷" style="display:none">
+  <h2>尝试行（正式轨）</h2>
+  <div class="表绕"><table><thead><tr>
+    <th>尝试号</th><th>状态</th><th>超时标记</th><th>响应码</th><th>票号/锁</th><th>说明</th><th>投递时</th>
+  </tr></thead><tbody id="尝试表"></tbody></table></div>
+</section>
+
+<section class="双栏">
+  <section class="卷" id="死信卷" style="display:none">
+    <h2>死信命运</h2><div id="死信卡" class="说明"></div>
+  </section>
+  <section class="卷" id="凭证卷" style="display:none">
+    <h2>旁路凭证（超时拒因）</h2>
+    <div class="表绕"><table><thead><tr><th>凭证号</th><th>拒因</th><th>命运</th></tr></thead>
+    <tbody id="凭证表"></tbody></table></div>
+  </section>
+</section>
+
+<section class="归档轨" id="归档卷" style="display:none">
+  <h2>只读归档壳（超时成功壳，双写第二轨）</h2>
+  <div class="表绕"><table><thead><tr><th>壳号</th><th>票号</th><th>拒因</th><th>壳内容</th></tr></thead>
+  <tbody id="归档表"></tbody></table></div>
 </section>
 
   </main>
 
 <script>
-document.getElementById('查').onclick = async () => {
-  try {
-    const id = document.getElementById('事件号').value;
-    document.getElementById('出').textContent = JSON.stringify(await 投递台.getJSON('/api/事件/'+encodeURIComponent(id)), null, 2);
-  } catch (e) { document.getElementById('出').textContent = e.message; }
-};
-</script>
+const $ = (id) => document.getElementById(id);
+let 当前 = null;
 
+async function 载() {
+  const id = $('事件号').value.trim();
+  if (!id) return;
+  try {
+    const d = await 投递台.getJSON('/api/事件/' + encodeURIComponent(id));
+    当前 = d;
+    $('命运卡位').innerHTML = 投递台.命运卡(d);
+
+    $('尝试卷').style.display = '';
+    const tb = $('尝试表'); tb.innerHTML = '';
+    for (const r of (d.尝试 || [])) {
+      const tr = 投递台.行(
+        '<td>' + 投递台.安全文本(r.尝试号) + '</td><td class="st"></td><td class="to"></td>'
+        + '<td>' + 投递台.安全文本(r.响应码) + '</td><td>' + 投递台.票号(r.票号 || r.锁令牌) + '</td>'
+        + '<td>' + 投递台.安全文本(r.说明) + '</td><td>' + 投递台.安全文本(r.投递时) + '</td>');
+      tr.querySelector('.st').appendChild(投递台.徽章(r.状态));
+      tr.querySelector('.to').innerHTML = 投递台.超时标(r);
+      if (r.是否超时 === 1) tr.classList.add('行超时');
+      tb.appendChild(tr);
+    }
+    if (!(d.尝试 || []).length) {
+      tb.innerHTML = '<tr><td colspan="7" class="说明">无任何尝试行。若上方命运为“空成功”，即是账实撕裂事故。</td></tr>';
+    }
+
+    if (d.死信) {
+      $('死信卷').style.display = '';
+      $('死信卡').innerHTML = '<p>死信号 <b>' + 投递台.安全文本(d.死信.死信号) + '</b></p>'
+        + '<p>失败次数：' + 投递台.安全文本(d.死信.失败次数) + '　状态：' + 投递台.安全文本(d.死信.状态) + '</p>'
+        + '<p>末次原因：' + 投递台.安全文本(d.死信.末次原因) + '</p><p>入匣时：' + 投递台.安全文本(d.死信.入匣时) + '</p>';
+    } else $('死信卷').style.display = 'none';
+
+    const creds = d.超时凭证 || [];
+    $('凭证卷').style.display = creds.length ? '' : 'none';
+    $('凭证表').innerHTML = creds.map(r =>
+      '<tr><td>' + 投递台.安全文本(r.凭证号) + '</td><td>' + 投递台.安全文本(r.拒因)
+      + '</td><td>' + 投递台.安全文本(r.命运) + '</td></tr>').join('');
+
+    const shells = d.归档壳 || [];
+    $('归档卷').style.display = shells.length ? '' : 'none';
+    $('归档表').innerHTML = shells.map(r =>
+      '<tr><td>' + 投递台.安全文本(r.壳号) + '</td><td>' + 投递台.票号(r.票号)
+      + '</td><td>' + 投递台.安全文本(r.拒因) + '</td><td><code>' + 投递台.安全文本(r.壳JSON) + '</code></td></tr>').join('');
+  } catch (e) {
+    $('命运卡位').innerHTML = '<div class="命运卡 tone-danger"><h3>读取失败</h3><p>' + 投递台.安全文本(e.message) + '</p></div>';
+  }
+}
+
+$('查').onclick = 载;
+$('投递钮').onclick = async () => {
+  try { const r = await 投递台.postJSON('/api/投递', {事件号: $('事件号').value.trim()});
+        $('消息').textContent = '返回 ' + r.状态 + ' / ' + r.事件状态; await 载(); }
+  catch (e) { $('消息').textContent = e.message; }
+};
+$('超时投递钮').onclick = async () => {
+  try { const r = await 投递台.postJSON('/api/投递/超时', {事件号: $('事件号').value.trim()});
+        $('消息').textContent = '超时已闸住：' + r.状态 + ' / ' + r.事件状态 + '，未标已投递'; await 载(); }
+  catch (e) { $('消息').textContent = e.message; }
+};
+
+const q = 投递台.查询参数();
+if (q.eid) { $('事件号').value = q.eid; 载(); }
+</script>
 </body>
 </html>

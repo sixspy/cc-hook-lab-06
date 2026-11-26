@@ -34,13 +34,30 @@
   <p class="消息" id="消息"></p>
   <button class="按钮" type="button" id="保存">保存签名规</button>
 </section>
+<section class="卷">
+  <h2>超时与命运策略（中文）</h2>
+  <div id="策略卡" class="命运卡 tone-warn"><p>读取签名规中…</p></div>
+</section>
 <section class="卷"><pre id="规" class="说明"></pre></section>
 
   </main>
 
 <script>
+function 策略文案(g) {
+  const 秒 = (g && g['超时秒']) || '5';
+  const 最大 = (g && g['最大重试']) || '3';
+  return '<h3>投递超时闸策略 · 骨签 hook-06</h3>'
+    + '<p>超时阈值 <b>' + 投递台.安全文本(秒) + '</b> 秒；最大重试 <b>' + 投递台.安全文本(最大) + '</b> 次。</p>'
+    + '<p>一旦判定投递超时：写一条状态为「失败」且带 <span class="徽章 超时">超时</span> 标记的正式尝试，'
+    + '事件转「投递中」继续同锁重试；失败次数达到最大重试则进「死信」。'
+    + '<b>铁律：超时绝不标成已投递（绝不允许“超时后正式尝试零增却事件已投递”），'
+    + '也绝不回没有尝试行的空成功壳抬水位。</b></p>'
+    + '<p>工程形态：双写两轨——超时成功壳进只读归档，旁路凭证记录拒因；流水与互证以同一票号对账。</p>';
+}
 async function 刷() {
-  document.getElementById('规').textContent = JSON.stringify(await 投递台.getJSON('/api/签名规'), null, 2);
+  const g = await 投递台.getJSON('/api/签名规');
+  document.getElementById('规').textContent = JSON.stringify(g, null, 2);
+  document.getElementById('策略卡').innerHTML = 策略文案(g);
 }
 document.getElementById('保存').onclick = async () => {
   try {

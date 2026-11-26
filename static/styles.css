@@ -123,3 +123,31 @@
     .登录壳 { grid-template-columns: 1fr; }
     .登录左 { padding: 28px; }
   }
+
+  /* ===== hook-06 投递超时不得成功：命运卡 / 超时标记 / 同票 / 只读归档 ===== */
+  .徽章.成功 { background: #d1fae5; color: #047857; }
+  .徽章.失败, .徽章.超时 { background: #fee2e2; color: #b91c1c; }
+  .徽章.死信 { background: #1f2937; color: #fecaca; }
+  .徽章.空成功 { background: #fecaca; color: #7f1d1d; outline: 1px dashed #b91c1c; }
+  .行超时 { background: #fff7ed; }
+  .票号 { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+          background: #eef2ff; color: #3730a3; padding: 1px 6px; border-radius: 6px; }
+  .命运卡 { border: 1px solid var(--边); border-left-width: 5px; border-radius: 10px;
+           padding: 14px 16px; margin: 12px 0; background: #fff; }
+  .命运卡 h3 { margin: 0 0 6px; font-size: 16px; }
+  .命运卡 p { margin: 4px 0; font-size: 13.5px; line-height: 1.6; }
+  .命运卡.tone-ok { border-left-color: #059669; }
+  .命运卡.tone-warn { border-left-color: #d97706; }
+  .命运卡.tone-danger { border-left-color: #dc2626; background: #fff5f5; }
+  .命运卡.tone-info { border-left-color: #2563eb; }
+  .命运卡.tone-muted { border-left-color: #9ca3af; }
+  .命运格 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
+  .命运格 div { background: rgba(0,0,0,0.03); border-radius: 6px; padding: 6px 8px; font-size: 12.5px; }
+  .命运格 b { display: block; font-size: 15px; color: var(--靛); }
+  .归档轨 { border: 1px dashed #b08968; background: #faf6f0; border-radius: 10px; padding: 14px 16px; margin: 16px 0; }
+  .归档轨 h2 { color: #7f5539; }
+  .双栏 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 980px) { .双栏 { grid-template-columns: 1fr; } }
+  .灯 { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .灯.绿 { background: #059669; } .灯.红 { background: #dc2626; } .灯.黄 { background: #d97706; }
+  a.事件链接 { color: var(--靛); text-decoration: underline; cursor: pointer; }

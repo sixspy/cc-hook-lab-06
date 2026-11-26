@@ -24,47 +24,165 @@
   </header>
   <main class="主区">
     <header class="页头">
-      <h1>投递流水</h1>
+      <h1>投递流水 <span class="徽章 超时">骨签 hook-06 · 超时不得成功</span></h1>
       <p>Webhook 投递控制台 · 应用开发全栈 · 非工单客服</p>
+      <p class="说明">铁律：投递超时只记失败或进死信，<b>绝不标已投递、绝不回空成功壳抬水位</b>。超时命运与跨表写库同成同败；并发超时重试打同一把锁、同票不双壳。</p>
     </header>
 
 <section class="卷">
   <label>事件号</label><input id="事件号" placeholder="EVT-..."/>
-  <label><input type="checkbox" id="强制失败"/> 强制失败（测死信）</label>
+  <div class="双栏">
+    <label><input type="checkbox" id="注入超时" style="width:auto;max-width:none"/> 注入投递超时（闸口判失败，504）</label>
+    <label><input type="checkbox" id="强制失败" style="width:auto;max-width:none"/> 强制失败（测普通失败/死信）</label>
+  </div>
+  <label>同票幂等键（可选，并发双请求填同一个）</label>
+  <input id="幂等键" placeholder="例如 HOOK06-TICKET-0001"/>
   <p class="消息" id="消息"></p>
-  <button class="按钮" type="button" id="投递钮">签名投递一次</button>
-  <button class="按钮 次" type="button" id="批量钮">批量重试待投</button>
+  <p class="说明" id="注入说明"></p>
+  <p>
+    <button class="按钮" type="button" id="投递钮">签名投递一次</button>
+    <button class="按钮 次" type="button" id="批量钮">批量重试待投</button>
+    <button class="按钮 次" type="button" id="超时夹具钮">① 灌「注入投递超时夹具」</button>
+  </p>
+  <div id="命运卡位"></div>
 </section>
-<section class="卷"><div class="表绕"><table><thead><tr><th>尝试号</th><th>事件号</th><th>端点键</th><th>签名摘要</th><th>状态</th><th>响应码</th></tr></thead><tbody id="表"></tbody></table></div></section>
+
+<section class="卷">
+  <h2>现行流水（正式轨 · 只读 <b>有尝试行</b> 集合）</h2>
+  <p class="说明">这里每一行都来自「投递尝试」表。空成功壳（已投递却无尝试行）不会混进流水，只会在事件命运与互证对账里被揪出。</p>
+  <div class="表绕"><table><thead><tr>
+    <th>尝试号</th><th>事件号</th><th>端点键</th><th>状态</th><th>超时标记</th><th>响应码</th><th>票号/锁</th><th>中文说明</th><th>投递时</th>
+  </tr></thead><tbody id="表"></tbody></table></div>
+</section>
+
+<section class="归档轨">
+  <h2>只读归档轨 · 超时壳（双写两轨，不计水位）</h2>
+  <p class="说明">超时瞬间那个“本该回出去的成功壳”被拒后双写归档到这里，仅供影子/正式同票对账；它不是正式尝试，永不抬已投递水位。读引用 <span class="票号">/api/归档</span> 与现行流水 <span class="票号">/api/投递</span> 分离。</p>
+  <div class="表绕"><table><thead><tr><th>壳号</th><th>事件号</th><th>票号</th><th>拒因</th><th>轨</th><th>入档时</th></tr></thead><tbody id="归档表"></tbody></table></div>
+</section>
+
+<section class="卷">
+  <h2>旁路凭证 · 超时拒因</h2>
+  <div class="表绕"><table><thead><tr><th>凭证号</th><th>事件号</th><th>票号</th><th>拒因</th><th>命运</th><th>时刻</th></tr></thead><tbody id="凭证表"></tbody></table></div>
+</section>
 
   </main>
 
 <script>
+const $ = (id) => document.getElementById(id);
+
+function 命运卡OfRep(rep) {
+  if (!rep) return '';
+  const ok = rep.状态 === '成功';
+  const tone = ok ? 'tone-ok' : (rep.事件状态 === '死信' ? 'tone-danger' : 'tone-warn');
+  const 灯 = ok ? '绿' : (rep.事件状态 === '死信' ? '红' : '黄');
+  return '<div class="命运卡 ' + tone + '"><h3><span class="灯 ' + 灯 + '"></span>'
+    + '本次返回命运：' + 投递台.安全文本(rep.状态) + ' / 事件：' + 投递台.安全文本(rep.事件状态)
+    + (rep.超时 ? ' <span class="徽章 超时">超时标记</span>' : '') + '</h3>'
+    + '<p>' + 投递台.安全文本(rep.中文说明 || rep.说明 || '') + '</p>'
+    + '<div class="命运格">'
+    + '<div>尝试号<b style="font-size:12px">' + 投递台.安全文本(rep.尝试号 || '—') + '</b></div>'
+    + '<div>票号<b style="font-size:12px">' + 投递台.安全文本(rep.票号 || '—') + '</b></div>'
+    + '<div>同票锁令牌<b style="font-size:12px">' + 投递台.安全文本(rep.锁令牌 || '—') + '</b></div>'
+    + '<div>失败次数<b>' + 投递台.安全文本(rep.失败次数 ?? '—') + '</b></div>'
+    + '</div></div>';
+}
+
+async function 刷事件命运(eid) {
+  if (!eid) { $('命运卡位').innerHTML = ''; return; }
+  try { const d = await 投递台.getJSON('/api/事件/' + encodeURIComponent(eid));
+        $('命运卡位').innerHTML = 命运卡OfRep(window.__lastRep) + 投递台.命运卡(d);
+  } catch (e) { /* 忽略详情渲染 */ }
+}
+
 async function 刷表() {
   const rows = await 投递台.getJSON('/api/投递');
-  const tb = document.getElementById('表'); tb.innerHTML='';
+  const tb = $('表'); tb.innerHTML = '';
   for (const r of rows) {
-    const tr = 投递台.行('<td>'+投递台.安全文本(r.尝试号)+'</td><td>'+投递台.安全文本(r.事件号)+'</td><td>'+投递台.安全文本(r.端点键)+'</td><td>'+投递台.安全文本(r.签名摘要)+'</td><td></td><td>'+投递台.安全文本(r.响应码)+'</td>');
-    tr.children[4].appendChild(投递台.徽章(r.状态)); tb.appendChild(tr);
+    const tr = 投递台.行(
+      '<td>' + 投递台.安全文本(r.尝试号) + '</td>'
+      + '<td><a class="事件链接" href="/事件详情.html?eid=' + encodeURIComponent(r.事件号) + '">' + 投递台.安全文本(r.事件号) + '</a></td>'
+      + '<td>' + 投递台.安全文本(r.端点键) + '</td>'
+      + '<td class="st"></td><td class="to"></td><td>' + 投递台.安全文本(r.响应码) + '</td>'
+      + '<td>' + 投递台.票号(r.票号 || r.锁令牌) + '</td>'
+      + '<td>' + 投递台.安全文本(r.说明) + '</td><td>' + 投递台.安全文本(r.投递时) + '</td>');
+    tr.querySelector('.st').appendChild(投递台.徽章(r.状态));
+    tr.querySelector('.to').innerHTML = 投递台.超时标(r);
+    if (r.是否超时 === 1 || (r.说明 || '').includes('超时')) tr.classList.add('行超时');
+    tb.appendChild(tr);
   }
 }
-document.getElementById('投递钮').onclick = async () => {
-  const 消息 = document.getElementById('消息');
+
+async function 刷归档() {
+  let rows = [];
+  try { rows = await 投递台.getJSON('/api/归档'); } catch (e) { rows = []; }
+  const tb = $('归档表'); tb.innerHTML = '';
+  if (!rows.length) tb.innerHTML = '<tr><td colspan="6" class="说明">归档轨为空：尚无被拒的超时成功壳。</td></tr>';
+  for (const r of rows) {
+    tb.appendChild(投递台.行(
+      '<td>' + 投递台.安全文本(r.壳号) + '</td>'
+      + '<td>' + 投递台.安全文本(r.事件号) + '</td>'
+      + '<td>' + 投递台.票号(r.票号) + '</td>'
+      + '<td>' + 投递台.安全文本(r.拒因) + '</td>'
+      + '<td><span class="徽章 空成功">只读归档</span></td>'
+      + '<td>' + 投递台.安全文本(r.入档时) + '</td>'));
+  }
+}
+
+async function 刷凭证() {
+  let rows = [];
+  try { rows = await 投递台.getJSON('/api/超时凭证'); } catch (e) { rows = []; }
+  const tb = $('凭证表'); tb.innerHTML = '';
+  if (!rows.length) tb.innerHTML = '<tr><td colspan="6" class="说明">暂无超时旁路凭证。</td></tr>';
+  for (const r of rows) {
+    tb.appendChild(投递台.行(
+      '<td>' + 投递台.安全文本(r.凭证号) + '</td><td>' + 投递台.安全文本(r.事件号) + '</td>'
+      + '<td>' + 投递台.票号(r.票号) + '</td><td>' + 投递台.安全文本(r.拒因) + '</td>'
+      + '<td><span class="徽章 投递中">' + 投递台.安全文本(r.命运) + '</span></td>'
+      + '<td>' + 投递台.安全文本(r.时刻) + '</td>'));
+  }
+}
+
+$('投递钮').onclick = async () => {
+  const 消息 = $('消息'); 消息.textContent = '';
   try {
     const rep = await 投递台.postJSON('/api/投递', {
-      事件号: document.getElementById('事件号').value,
-      强制失败: document.getElementById('强制失败').checked,
+      事件号: $('事件号').value.trim(),
+      强制失败: $('强制失败').checked,
+      注入超时: $('注入超时').checked,
+      幂等键: $('幂等键').value.trim() || undefined,
     });
-    消息.textContent = JSON.stringify(rep);
-    await 刷表();
+    window.__lastRep = rep;
+    消息.textContent = '已落账：' + rep.状态 + ' / ' + rep.事件状态 + (rep.超时 ? '（超时已闸住，未标已投递）' : '');
+    await Promise.all([刷表(), 刷归档(), 刷凭证(), 刷事件命运($('事件号').value.trim())]);
   } catch (e) { 消息.textContent = e.message; }
 };
-document.getElementById('批量钮').onclick = async () => {
+
+$('批量钮').onclick = async () => {
   const rep = await 投递台.postJSON('/api/投递/批量重试', {});
-  document.getElementById('消息').textContent = '批量 '+rep.条数;
+  $('消息').textContent = '批量处理 ' + rep.条数 + ' 条（顺序重试各自增尝试，不重叠不双壳）';
   await 刷表();
 };
-刷表();
+
+$('超时夹具钮').onclick = async () => {
+  $('消息').textContent = '已注入夹具，正在入队…';
+  try {
+    const rep = await 投递台.postJSON('/api/夹具入队/注入投递超时夹具', {});
+    const eid = rep.入队 && rep.入队[0] && rep.入队[0].事件号;
+    if (eid) { $('事件号').value = eid; $('注入超时').checked = true; }
+    $('注入说明').textContent = (rep.注入说明 || '') + ' 武装：' + JSON.stringify(rep.武装注入);
+    $('消息').textContent = '事故已注入：现在点「签名投递一次」复现并验证闸口。';
+    await 刷表();
+  } catch (e) { $('消息').textContent = e.message; }
+};
+
+// 从事件队列/详情跳转带入
+const q = 投递台.查询参数();
+if (q.eid) $('事件号').value = q.eid;
+if (q.timeout === '1') $('注入超时').checked = true;
+if (q.key) $('幂等键').value = q.key;
+刷表().then(() => q.eid && 刷事件命运(q.eid));
+刷归档(); 刷凭证();
 </script>
 
 </body>

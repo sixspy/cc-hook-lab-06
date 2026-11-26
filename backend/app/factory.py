@@ -5,6 +5,7 @@ from flask import Flask, jsonify, redirect, request, send_from_directory
 
 from app import seed
 from app.services import 会话, 入队, 投递, 死信, 重试, 互证, 端点, 夹具, 说明, 签名目录
+from app.modules import 并发投递锁 as 并发锁模块
 
 _STATIC = Path(__file__).resolve().parent / "static"
 
@@ -96,8 +97,31 @@ def create_app() -> Flask:
     @app.post("/api/投递")
     def api_投递():
         body = request.get_json(force=True, silent=True) or {}
+        票 = (request.headers.get("Idempotency-Key")
+              or request.headers.get("X-票号")
+              or body.get("幂等键") or body.get("票") or body.get("请求键"))
         try:
-            return jsonify(投递.投递一次(body["事件号"], bool(body.get("强制失败"))))
+            return jsonify(投递.投递一次(
+                body["事件号"],
+                bool(body.get("强制失败")),
+                bool(body.get("注入超时") or body.get("超时")
+                     or body.get("强制超时") or body.get("投递超时")),
+                幂等键=票,
+            ))
+        except TimeoutError as e:
+            return jsonify({"错误": "同锁等待超时", "详情": str(e)}), 409
+        except (KeyError, ValueError) as e:
+            return jsonify({"错误": str(e)}), 400
+
+    @app.post("/api/投递/超时")
+    def api_投递超时():
+        """语义别名：强制注入一次投递超时（骨签 hook-06）。"""
+        body = request.get_json(force=True, silent=True) or {}
+        票 = request.headers.get("Idempotency-Key") or body.get("幂等键") or body.get("票")
+        try:
+            return jsonify(投递.投递一次(body["事件号"], False, True, 幂等键=票))
+        except TimeoutError as e:
+            return jsonify({"错误": "同锁等待超时", "详情": str(e)}), 409
         except (KeyError, ValueError) as e:
             return jsonify({"错误": str(e)}), 400
 
@@ -162,11 +186,56 @@ def create_app() -> Flask:
         try:
             体 = 夹具.读取(name)
             out = [入队.建事件(item) for item in 体.get("事件", [])]
-            return jsonify({"入队": out})
+            武装 = None
+            注入块 = 体.get("注入") or {}
+            if 注入块.get("投递超时"):
+                # 逐事件武装，保证随后在投递流水点“投递”时超时闸必命中
+                for ev in out:
+                    武装 = 夹具.武装超时注入(
+                        ev["事件号"],
+                        拒因=注入块.get("拒因"),
+                        超时秒=int(注入块.get("超时秒") or 5),
+                    )
+            return jsonify({"入队": out, "武装注入": 武装, "注入说明": 体.get("说明", "")})
         except FileNotFoundError:
             return jsonify({"错误": name}), 404
         except ValueError as e:
             return jsonify({"错误": str(e)}), 400
+
+    @app.post("/api/注入超时")
+    def api_注入超时():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(夹具.武装超时注入(
+                body.get("事件号") or "*",
+                拒因=body.get("拒因"),
+                超时秒=int(body.get("超时秒") or 5),
+            ))
+        except ValueError as e:
+            return jsonify({"错误": str(e)}), 400
+
+    @app.post("/api/解除注入")
+    def api_解除注入():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(夹具.解除注入(body.get("事件号")))
+
+    @app.get("/api/归档")
+    @app.get("/api/影子")
+    def api_归档():
+        return jsonify(签名目录.归档列表())
+
+    @app.get("/api/超时凭证")
+    @app.get("/api/旁路凭证")
+    def api_超时凭证():
+        return jsonify(签名目录.凭证列表())
+
+    @app.get("/api/锁")
+    def api_锁():
+        return jsonify({"台账": 签名目录.锁列表(), "进程内活跃": 并发锁模块.活跃锁()})
+
+    @app.get("/api/注入")
+    def api_注入列表():
+        return jsonify(签名目录.注入列表())
 
     @app.get("/api/空桩")
     def api_空桩():

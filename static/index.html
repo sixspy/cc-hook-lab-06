@@ -29,8 +29,18 @@
     </header>
 
 <section class="卷"><div class="指标" id="指标"></div></section>
-<section class="卷"><table><thead><tr><th>事件号</th><th>事件类型</th><th>端点键</th><th>状态</th></tr></thead><tbody id="表"></tbody></table></section>
-<section class="卷"><p class="说明" id="主链"></p><button class="按钮" type="button" id="互证钮">跑投递互证</button><pre id="互证出" class="说明"></pre></section>
+<section class="卷">
+  <h2>事件命运列表</h2>
+  <p class="说明">“空成功·账实撕裂”表示事件标已投递却无尝试行——hook-06 严禁这种空成功抬水位，互证会判不对齐。</p>
+  <div class="表绕"><table><thead><tr><th>事件号</th><th>事件类型</th><th>端点键</th><th>状态</th><th>事件命运（中文）</th></tr></thead><tbody id="表"></tbody></table></div>
+</section>
+<section class="卷"><p class="说明" id="主链"></p>
+  <p>
+    <button class="按钮" type="button" id="互证钮">跑投递互证</button>
+    <a class="按钮 次" style="text-decoration:none;display:inline-block" href="/投递流水.html">去投递流水/超时演练</a>
+  </p>
+  <div id="互证卡"></div>
+</section>
 
   </main>
 
@@ -41,6 +51,7 @@
   for (const [k,v] of Object.entries(o)) {
     if (v && typeof v === 'object') continue;
     const d = document.createElement('div'); d.className='卡';
+    if (k === '空成功' && Number(v) > 0) d.style.outline = '2px solid #dc2626';
     d.innerHTML = '<small>'+投递台.安全文本(k)+'</small><b>'+投递台.安全文本(v)+'</b>';
     box.appendChild(d);
   }
@@ -48,13 +59,30 @@
   document.getElementById('主链').textContent = c.主链 || '';
   const rows = await 投递台.getJSON('/api/事件');
   const tb = document.getElementById('表');
-  for (const r of rows.slice(0,12)) {
-    const tr = 投递台.行('<td>'+投递台.安全文本(r.事件号)+'</td><td>'+投递台.安全文本(r.事件类型)+'</td><td>'+投递台.安全文本(r.端点键)+'</td><td></td>');
-    tr.children[3].appendChild(投递台.徽章(r.状态)); tb.appendChild(tr);
+  for (const r of rows.slice(0,20)) {
+    const tr = 投递台.行(
+      '<td><a class="事件链接" href="/事件详情.html?eid='+encodeURIComponent(r.事件号)+'">'+投递台.安全文本(r.事件号)+'</a></td>'
+      + '<td>'+投递台.安全文本(r.事件类型)+'</td><td>'+投递台.安全文本(r.端点键)+'</td><td class="st"></td><td>'+投递台.安全文本(r.命运 || r.状态)+'</td>');
+    tr.querySelector('.st').appendChild(投递台.徽章(r.空成功 ? '空成功' : r.状态));
+    tb.appendChild(tr);
   }
-  document.getElementById('互证钮').onclick = async () => {
-    document.getElementById('互证出').textContent = JSON.stringify(await 投递台.postJSON('/api/互证/跑',{}), null, 2);
-  };
+  async function 跑互证() {
+    const rep = await 投递台.postJSON('/api/互证/跑',{});
+    const tone = rep.是否对齐 ? 'tone-ok' : 'tone-danger';
+    const 灯 = rep.是否对齐 ? '绿' : '红';
+    document.getElementById('互证卡').innerHTML =
+      '<div class="命运卡 '+tone+'"><h3><span class="灯 '+灯+'"></span>'
+      + (rep.是否对齐 ? '互证对齐' : '互证判撕裂（不对齐）') + '</h3>'
+      + '<p>'+投递台.安全文本(rep.说明)+'</p>'
+      + '<div class="命运格">'
+      + '<div>空成功<b>'+投递台.安全文本(rep.空成功数 ?? 0)+'</b></div>'
+      + '<div>无成功尝试<b>'+投递台.安全文本(rep.无成功尝试数 ?? 0)+'</b></div>'
+      + '<div>超时尝试<b>'+投递台.安全文本(rep.超时数 ?? 0)+'</b></div>'
+      + '<div>同票<b>'+(rep.同票 ? '是' : '否')+'</b></div>'
+      + '<div>影子/正式票<b>'+投递台.安全文本(rep.影子票数 ?? 0)+' / '+投递台.安全文本(rep.正式票数 ?? 0)+'</b></div>'
+      + '</div></div>';
+  }
+  document.getElementById('互证钮').onclick = 跑互证;
 })();
 </script>
 

@@ -24,27 +24,41 @@
   </header>
   <main class="主区">
     <header class="页头">
-      <h1>死信匣</h1>
-      <p>Webhook 投递控制台 · 应用开发全栈 · 非工单客服</p>
+      <h1>死信匣目录</h1>
+      <p>超时/失败重试耗尽即入匣；死信与事件死信数、互证批次同票同源。</p>
     </header>
 
 <section class="卷">
-  <label>事件号</label><input id="事件号"/>
+  <label>事件号</label><input id="事件号" placeholder="EVT-..."/>
   <p class="消息" id="消息"></p>
   <button class="按钮" type="button" id="重投钮">死信重投</button>
   <button class="按钮 次" type="button" id="作废钮">作废</button>
 </section>
-<section class="卷"><div class="表绕"><table><thead><tr><th>死信号</th><th>事件号</th><th>端点键</th><th>失败次数</th><th>末次原因</th><th>状态</th></tr></thead><tbody id="表"></tbody></table></div></section>
+<section class="卷"><div class="表绕"><table><thead><tr>
+  <th>死信号</th><th>事件号</th><th>端点键</th><th>失败次数</th><th>末次原因</th><th>状态</th><th>中文命运</th>
+</tr></thead><tbody id="表"></tbody></table></div></section>
 
   </main>
 
 <script>
+function 中文命运(r) {
+  if (r.状态 === '已作废') return '已作废：人工作废结案，事件转已作废';
+  if (r.状态 === '已重投') return '已重投：回待投，重新走签名投递';
+  if ((r.末次原因 || '').includes('超时')) return '待处置：投递超时耗尽重试入匣（非成功），可重投/作废';
+  return '待处置：重试耗尽入匣，可重投或作废';
+}
 async function 刷表() {
   const rows = await 投递台.getJSON('/api/死信');
   const tb = document.getElementById('表'); tb.innerHTML='';
   for (const r of rows) {
-    const tr = 投递台.行('<td>'+投递台.安全文本(r.死信号)+'</td><td>'+投递台.安全文本(r.事件号)+'</td><td>'+投递台.安全文本(r.端点键)+'</td><td>'+投递台.安全文本(r.失败次数)+'</td><td>'+投递台.安全文本(r.末次原因)+'</td><td></td>');
-    tr.children[5].appendChild(投递台.徽章(r.状态)); tb.appendChild(tr);
+    const tr = 投递台.行(
+      '<td>'+投递台.安全文本(r.死信号)+'</td>'
+      + '<td><a class="事件链接" href="/事件详情.html?eid='+encodeURIComponent(r.事件号)+'">'+投递台.安全文本(r.事件号)+'</a></td>'
+      + '<td>'+投递台.安全文本(r.端点键)+'</td><td>'+投递台.安全文本(r.失败次数)+'</td>'
+      + '<td>'+((r.末次原因||'').includes('超时') ? '<span class="徽章 超时">超时</span> ' : '')+投递台.安全文本(r.末次原因)+'</td>'
+      + '<td class="st"></td><td>'+投递台.安全文本(中文命运(r))+'</td>');
+    tr.querySelector('.st').appendChild(投递台.徽章(r.状态));
+    tb.appendChild(tr);
   }
 }
 document.getElementById('重投钮').onclick = async () => {
